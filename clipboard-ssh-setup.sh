@@ -8,6 +8,7 @@ ok()     { echo -e "${GREEN}✓${RESET} $1"; }
 info()   { echo -e "${YELLOW}→${RESET} $1"; }
 die()    { echo -e "${RED}✗ $1${RESET}" >&2; exit 1; }
 
+CHOICE=0
 prompt_choice() {
   local prompt="$1"; shift
   local options=("$@")
@@ -18,17 +19,19 @@ prompt_choice() {
     [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#options[@]} )) && break
     echo "Invalid choice, try again."
   done
-  echo $((choice - 1))
+  CHOICE=$((choice - 1))
 }
 
 banner "SSH Clipboard Setup"
 echo "This script configures copy-over-SSH using OSC 52 + tunnel fallback."
 
 # --- Role ---
-role_idx=$(prompt_choice "Is this the LOCAL machine or REMOTE server?" "Local machine" "Remote server")
+prompt_choice "Is this the LOCAL machine or REMOTE server?" "Local machine" "Remote server"
+role_idx=$CHOICE
 
 # --- OS ---
-os_idx=$(prompt_choice "What OS is this machine?" "macOS" "Ubuntu/Debian" "Arch Linux" "Windows 11 (WSL2)" "Windows 11 (native PowerShell)")
+prompt_choice "What OS is this machine?" "macOS" "Ubuntu/Debian" "Arch Linux" "Windows 11 (WSL2)" "Windows 11 (native PowerShell)"
+os_idx=$CHOICE
 OS_NAMES=("macos" "ubuntu" "arch" "wsl2" "windows")
 OS="${OS_NAMES[$os_idx]}"
 
