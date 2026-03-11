@@ -22,11 +22,36 @@ prompt_choice() {
   CHOICE=$((choice - 1))
 }
 
+remove_rc_block() {
+  local file="$1"
+  local marker="$2"
+  if [[ -f "$file" ]] && grep -q "$marker" "$file"; then
+    # Remove from the blank line before the marker to the next blank line after the block
+    perl -i -0pe "s/\n[^\n]*${marker}.*?(\n\n|\z)/\n/s" "$file" 2>/dev/null || \
+      sed -i "/${marker}/,/^$/d" "$file"
+    ok "Removed from $file"
+  else
+    info "Nothing to remove in $file (already clean)"
+  fi
+}
+
+remove_ssh_config_block() {
+  local file="$HOME/.ssh/config"
+  local marker="$1"
+  if [[ -f "$file" ]] && grep -q "$marker" "$file"; then
+    perl -i -0pe "s/\n[^\n]*${marker}[^\n]*(\n[ \t]+[^\n]+)*/\n/g" "$file" 2>/dev/null || \
+      sed -i "/${marker}/,/^[^ \t]/{ /^[^ \t]/!d; /${marker}/d }" "$file"
+    ok "Removed SSH config entry: $marker"
+  else
+    info "No SSH config entry found for: $marker"
+  fi
+}
+
 banner "SSH Clipboard Setup"
 echo "This script configures copy-over-SSH using OSC 52 + tunnel fallback."
 
 # --- Role ---
-prompt_choice "Is this the LOCAL machine or REMOTE server?" "Local machine" "Remote server"
+prompt_choice "What would you like to do?" "Set up LOCAL machine" "Set up REMOTE server" "Remove / uninstall"
 role_idx=$CHOICE
 
 # --- OS ---
@@ -34,6 +59,73 @@ prompt_choice "What OS is this machine?" "macOS" "Ubuntu/Debian" "Arch Linux" "W
 os_idx=$CHOICE
 OS_NAMES=("macos" "ubuntu" "arch" "wsl2" "windows")
 OS="${OS_NAMES[$os_idx]}"
+
+# ─────────────────────────────────────────────
+# REMOVAL
+# ─────────────────────────────────────────────
+if [[ $role_idx -eq 2 ]]; then
+  banner "Removing SSH Clipboard Setup ($OS)"
+
+  SHELL_RC="$HOME/.bashrc"
+  [[ "$SHELL" == */zsh ]] && SHELL_RC="$HOME/.zshrc"
+
+  if [[ "$OS" == "windows" ]]; then
+    echo ""
+    echo -e "${YELLOW}Run this in PowerShell to undo setup:${RESET}"
+    echo ""
+    cat << 'PS'
+# Remove SSH config entries added by this script
+$sshConfig = "$env:USERPROFILE\.ssh\config"
+(Get-Content $sshConfig) | Where-Object {
+  $_ -notmatch "SetEnv TERM=xterm-256color" -and
+  $_ -notmatch "RemoteForward 2224"
+} | Set-Content $sshConfig
+
+# Stop the clipboard listener job if running
+Get-Job | Where-Object { $_.State -eq 'Running' } | Stop-Job | Remove-Job
+Write-Host "✓ Removed"
+PS
+    exit 0
+  fi
+
+  # Remove copy() or ssh-clipboard-listen() from rc file
+  info "Cleaning $SHELL_RC..."
+  if [[ -f "$SHELL_RC" ]]; then
+    perl -i -0pe 's/\ncopy\(\) \{.*?\n\}\n?//s' "$SHELL_RC" 2>/dev/null || true
+    perl -i -0pe 's/\nssh-clipboard-listen\(\) \{.*?\n\}\nssh-clipboard-listen.*?\n?//s' "$SHELL_RC" 2>/dev/null || true
+    ok "Cleaned $SHELL_RC"
+  fi
+
+  # Remove SSH config entries
+  info "Cleaning ~/.ssh/config..."
+  SSH_CONFIG="$HOME/.ssh/config"
+  if [[ -f "$SSH_CONFIG" ]]; then
+    perl -i -0pe 's/\nHost \*\n    SetEnv TERM=xterm-256color\n?//g' "$SSH_CONFIG" 2>/dev/null || true
+    perl -i -0pe 's/\n    RemoteForward 2224 localhost:2224\n?//g' "$SSH_CONFIG" 2>/dev/null || true
+    ok "Cleaned $SSH_CONFIG"
+  fi
+
+  # macOS: unload and remove LaunchAgent
+  if [[ "$OS" == "macos" ]]; then
+    PLIST="$HOME/Library/LaunchAgents/com.user.ssh-clipboard.plist"
+    if [[ -f "$PLIST" ]]; then
+      launchctl unload "$PLIST" 2>/dev/null || true
+      rm -f "$PLIST"
+      ok "Removed LaunchAgent"
+    else
+      info "No LaunchAgent found"
+    fi
+  fi
+
+  # Kill any running socat listener
+  if pkill -f "socat TCP-LISTEN:2224" 2>/dev/null; then
+    ok "Killed running socat listener"
+  fi
+
+  echo ""
+  ok "Uninstall complete. Reload your shell: source ${SHELL_RC}"
+  exit 0
+fi
 
 # ─────────────────────────────────────────────
 # REMOTE SETUP
@@ -58,7 +150,6 @@ copy() {
 }
 EOF
 
-  # Install socat if missing
   if ! command -v socat &>/dev/null; then
     info "Installing socat (tunnel fallback)..."
     if command -v apt-get &>/dev/null; then
