@@ -15,6 +15,12 @@ Uses **OSC 52** as the primary method (terminal escape sequence, zero overhead) 
 
 ---
 
+## Download
+To get started, download the setup script directly to your machine:
+```bash
+curl -O https://raw.githubusercontent.com/Valhallabooi/SSH-copy-paste/main/clipboard-ssh-setup.sh
+```
+
 ## Installation
 
 Run the same script on **both** machines — it asks you what to set up:
